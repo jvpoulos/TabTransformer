@@ -96,6 +96,14 @@ class Transformer(nn.Module):
 
         return x, torch.stack(post_softmax_attns)
 
+    # New method to get the last layer's embeddings
+    def get_embeddings(self, x_categ, x_cont):
+        x = torch.cat((x_categ, x_cont), dim=1)  # Concatenate categorical and continuous features
+        for attn, ff in self.layers:
+            x = attn(x)[0] + x  # Only take the output, not the attention weights
+            x = ff(x) + x
+        return x  # This will return the output of the last layer
+
 # numerical embedder
 
 class NumericalEmbedder(nn.Module):
