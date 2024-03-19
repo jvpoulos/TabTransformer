@@ -118,14 +118,6 @@ class Transformer(nn.Module):
 
         return x, torch.stack(post_softmax_attns)
 
-    # New method to get the last layer's embeddings
-    def get_embeddings(self, x_categ, x_cont):
-        x = torch.cat((x_categ, x_cont), dim=1)  # Concatenate categorical and continuous features
-        for attn, ff in self.layers:
-            x = attn(x)[0] + x  # Only take the output, not the attention weights
-            x = ff(x) + x
-        return x  # This will return the output of the last layer
-
 # mlp
 
 class MLP(nn.Module):
@@ -271,3 +263,25 @@ class TabTransformer(nn.Module):
             return logits
 
         return logits, attns
+
+    def get_embeddings(self, x_categ, x_numer):
+        assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
+
+        xs = []
+        if self.num_unique_categories > 0:
+            x_categ = x_categ + self.categories_offset
+            x_categ = self.categorical_embeds(x_categ)
+            xs.append(x_categ)
+
+        if self.num_continuous > 0:
+            x_numer = self.numerical_embedder(x_numer)
+            xs.append(x_numer)
+
+        x = torch.cat(xs, dim=1)
+
+        b = x.shape[0]
+        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
+        x = torch.cat((cls_tokens, x), dim=1)
+
+        x, _ = self.transformer(x)
+        return x[:, 1:]  # Exclude the CLS token from the embeddings
