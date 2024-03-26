@@ -229,6 +229,7 @@ class FTTransformer(nn.Module):
         xs = []
         if self.num_unique_categories > 0:
             x_categ = x_categ + self.categories_offset
+            x_categ = x_categ.long()  # Convert x_categ to Long data type
             x_categ = self.categorical_embeds(x_categ)
             xs.append(x_categ)
 
