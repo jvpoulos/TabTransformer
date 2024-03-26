@@ -70,26 +70,34 @@ class Transformer(nn.Module):
         heads,
         dim_head,
         attn_dropout,
-        ff_dropout
+        ff_dropout,
+        checkpoint_grads=False,
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Attention(dim, heads = heads, dim_head = dim_head, dropout = attn_dropout),
-                FeedForward(dim, dropout = ff_dropout),
+                Attention(dim, heads=heads, dim_head=dim_head, dropout=attn_dropout),
+                FeedForward(dim, dropout=ff_dropout),
             ]))
 
-    def forward(self, x, return_attn = False):
+        self.checkpoint_grads = checkpoint_grads
+
+    def forward(self, x, return_attn=False):
         post_softmax_attns = []
 
         for attn, ff in self.layers:
-            attn_out, post_softmax_attn = attn(x)
-            post_softmax_attns.append(post_softmax_attn)
-
-            x = attn_out + x
-            x = ff(x) + x
+            if self.checkpoint_grads:
+                attn_out, post_softmax_attn = torch.utils.checkpoint.checkpoint(attn, x)
+                post_softmax_attns.append(post_softmax_attn)
+                x = attn_out + x
+                x = torch.utils.checkpoint.checkpoint(ff, x) + x
+            else:
+                attn_out, post_softmax_attn = attn(x)
+                post_softmax_attns.append(post_softmax_attn)
+                x = attn_out + x
+                x = ff(x) + x
 
         if not return_attn:
             return x

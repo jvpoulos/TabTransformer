@@ -92,26 +92,34 @@ class Transformer(nn.Module):
         heads,
         dim_head,
         attn_dropout,
-        ff_dropout
+        ff_dropout,
+        checkpoint_grads=False,  # Add this argument
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = attn_dropout)),
-                PreNorm(dim, FeedForward(dim, dropout = ff_dropout)),
+                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=attn_dropout)),
+                PreNorm(dim, FeedForward(dim, dropout=ff_dropout)),
             ]))
 
-    def forward(self, x, return_attn = False):
+        self.checkpoint_grads = checkpoint_grads  # Store the value of the argument
+
+    def forward(self, x, return_attn=False):
         post_softmax_attns = []
 
         for attn, ff in self.layers:
-            attn_out, post_softmax_attn = attn(x)
-            post_softmax_attns.append(post_softmax_attn)
-
-            x = x + attn_out
-            x = ff(x) + x
+            if self.checkpoint_grads:
+                attn_out, post_softmax_attn = torch.utils.checkpoint.checkpoint(attn, x)
+                post_softmax_attns.append(post_softmax_attn)
+                x = x + attn_out
+                x = torch.utils.checkpoint.checkpoint(ff, x) + x
+            else:
+                attn_out, post_softmax_attn = attn(x)
+                post_softmax_attns.append(post_softmax_attn)
+                x = x + attn_out
+                x = ff(x) + x
 
         if not return_attn:
             return x
@@ -160,7 +168,8 @@ class TabTransformer(nn.Module):
         attn_dropout = 0.,
         ff_dropout = 0.,
         use_shared_categ_embed = True,
-        shared_categ_dim_divisor = 8.   # in paper, they reserve dimension / 8 for category shared embedding
+        shared_categ_dim_divisor = 8,   # in paper, they reserve dimension / 8 for category shared embedding
+        checkpoint_grads=False,  
     ):
         super().__init__()
         assert all(map(lambda n: n > 0, categories)), 'number of each category must be positive'
@@ -209,12 +218,13 @@ class TabTransformer(nn.Module):
         # transformer
 
         self.transformer = Transformer(
-            dim = dim,
-            depth = depth,
-            heads = heads,
-            dim_head = dim_head,
-            attn_dropout = attn_dropout,
-            ff_dropout = ff_dropout
+            dim=dim,
+            depth=depth,
+            heads=heads,
+            dim_head=dim_head,
+            attn_dropout=attn_dropout,
+            ff_dropout=ff_dropout,
+            checkpoint_grads=checkpoint_grads,
         )
 
         # mlp to logits
