@@ -117,7 +117,6 @@ class Transformer(nn.Module):
             return x
 
         return x, torch.stack(post_softmax_attns)
-
 # mlp
 
 class MLP(nn.Module):
