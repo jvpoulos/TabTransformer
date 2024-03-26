@@ -93,7 +93,7 @@ class Transformer(nn.Module):
         dim_head,
         attn_dropout,
         ff_dropout,
-        checkpoint_grads=False,  # Add this argument
+        checkpoint_grads=False,
     ):
         super().__init__()
         self.layers = nn.ModuleList([])

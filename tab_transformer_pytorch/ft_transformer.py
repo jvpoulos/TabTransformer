@@ -131,7 +131,8 @@ class FTTransformer(nn.Module):
         dim_out = 1,
         num_special_tokens = 2,
         attn_dropout = 0.,
-        ff_dropout = 0.
+        ff_dropout = 0.,
+        checkpoint_grads=False
     ):
         super().__init__()
         assert all(map(lambda n: n > 0, categories)), 'number of each category must be positive'
@@ -177,7 +178,8 @@ class FTTransformer(nn.Module):
             heads = heads,
             dim_head = dim_head,
             attn_dropout = attn_dropout,
-            ff_dropout = ff_dropout
+            ff_dropout = ff_dropout,
+            checkpoint_grads=checkpoint_grads,
         )
 
         # to logits
