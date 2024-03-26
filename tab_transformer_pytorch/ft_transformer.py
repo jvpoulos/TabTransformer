@@ -243,5 +243,5 @@ class FTTransformer(nn.Module):
         cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
         x = torch.cat((cls_tokens, x), dim=1)
 
-        x, _ = self.transformer(x)
+        x = self.transformer(x, return_attn=False)  # Only return the output tensor
         return x[:, 1:]  # Exclude the CLS token from the embeddings
