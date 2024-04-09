@@ -28,8 +28,8 @@ class PreNorm(nn.Module):
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
 
-    def forward(self, x, **kwargs):
-        return self.fn(self.norm(x), **kwargs)
+    def forward(self, x):
+        return self.fn(self.norm(x))
 
 # attention
 
@@ -39,16 +39,17 @@ class GEGLU(nn.Module):
         return x * F.gelu(gates)
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult = 4, dropout = 0.):
+    def __init__(self, dim, hidden_dim, dropout = 0.):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(dim, dim * mult * 2),
-            GEGLU(),
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(dim * mult, dim)
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
         )
 
-    def forward(self, x, **kwargs):
+    def forward(self, x):
         return self.net(x)
 
 class Attention(nn.Module):
@@ -69,20 +70,18 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, return_attn=False):
+    def forward(self, x):
         h = self.heads
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         sim = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
         attn = sim.softmax(dim = -1)
-        dropped_attn = self.dropout(attn)
+        attn = self.dropout(attn)
 
-        out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)', h = h)
         return self.to_out(out)
-
-# transformer
 
 class Transformer(nn.Module):
     def __init__(
@@ -93,31 +92,39 @@ class Transformer(nn.Module):
         dim_head,
         attn_dropout,
         ff_dropout,
-        checkpoint_grads=False,
+        ff_hidden_mult = 2,
+        checkpoint_grads = False
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads=heads, dim_head=dim_head, dropout=attn_dropout)),
-                PreNorm(dim, FeedForward(dim, dropout=ff_dropout)),
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = attn_dropout)),
+                PreNorm(dim, FeedForward(dim, dim * ff_hidden_mult, dropout = ff_dropout))
             ]))
 
-        self.checkpoint_grads = checkpoint_grads  # Store the value of the argument
+        self.checkpoint_grads = checkpoint_grads
 
     def forward(self, x, return_attn=False):
-        for attn, ff in self.layers:
-            if self.checkpoint_grads:
-                attn_out = torch.utils.checkpoint.checkpoint(attn, x, return_attn=False)
-                x = attn_out + x
-                x = torch.utils.checkpoint.checkpoint(ff, x) + x
-            else:
-                attn_out = attn(x, return_attn=False)
-                x = attn_out + x
-                x = ff(x) + x
+        post_softmax_attns = []
 
-        return x
+        for attn, ff in self.layers:
+            if return_attn:
+                x, post_softmax_attn = attn(x, return_attn=True)
+                post_softmax_attns.append(post_softmax_attn)
+            else:
+                x = x + attn(x)
+
+            if self.checkpoint_grads:
+                x = x + torch.utils.checkpoint.checkpoint(ff, x)
+            else:
+                x = x + ff(x)
+
+        if not return_attn:
+            return x
+
+        return x, torch.stack(post_softmax_attns)
 # mlp
 
 class MLP(nn.Module):
@@ -229,21 +236,24 @@ class TabTransformer(nn.Module):
 
         self.mlp = MLP(all_dimensions, act = mlp_act)
 
-    def forward(self, x_categ, x_cont, return_attn = False):
+    def forward(self, x_categ, x_cont, return_attn=False):
         xs = []
 
         assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
-
+        
         if self.num_unique_categories > 0:
             x_categ = x_categ + self.categories_offset
 
             categ_embed = self.category_embed(x_categ)
 
             if self.use_shared_categ_embed:
-                shared_categ_embed = repeat(self.shared_category_embed, 'n d -> b n d', b = categ_embed.shape[0])
-                categ_embed = torch.cat((categ_embed, shared_categ_embed), dim = -1)
+                shared_categ_embed = repeat(self.shared_category_embed, 'n d -> b n d', b=categ_embed.shape[0])
+                categ_embed = torch.cat((categ_embed, shared_categ_embed), dim=-1)
 
-            x, attns = self.transformer(categ_embed, return_attn = True)
+            if return_attn:
+                x, attns = self.transformer(categ_embed, return_attn=True)
+            else:
+                x = self.transformer(categ_embed, return_attn=False)
 
             flat_categ = rearrange(x, 'b ... -> b (...)')
             xs.append(flat_categ)

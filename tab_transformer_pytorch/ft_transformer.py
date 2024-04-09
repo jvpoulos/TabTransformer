@@ -84,18 +84,27 @@ class Transformer(nn.Module):
 
         self.checkpoint_grads = checkpoint_grads
 
-    def forward(self, x, return_attn=False):
+   def forward(self, x, return_attn=False):
+        post_softmax_attns = []
+
         for attn, ff in self.layers:
-            if self.checkpoint_grads:
-                attn_out = torch.utils.checkpoint.checkpoint(attn, x, return_attn=False)
-                x = attn_out + x
-                x = torch.utils.checkpoint.checkpoint(ff, x) + x
+            if return_attn:
+                attn_out, post_softmax_attn = attn(x, return_attn=True)
+                post_softmax_attns.append(post_softmax_attn)
             else:
                 attn_out = attn(x, return_attn=False)
+
+            if self.checkpoint_grads:
+                x = torch.utils.checkpoint.checkpoint(lambda: attn_out + x)
+                x = torch.utils.checkpoint.checkpoint(ff, x) + x
+            else:
                 x = attn_out + x
                 x = ff(x) + x
 
-        return x
+        if not return_attn:
+            return x
+
+        return x, torch.stack(post_softmax_attns)
 
 # numerical embedder
 
@@ -183,7 +192,7 @@ class FTTransformer(nn.Module):
             nn.Linear(dim, dim_out)
         )
 
-    def forward(self, x_categ, x_numer, return_attn = False):
+    def forward(self, x_categ, x_numer, return_attn=False):
         assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
 
         xs = []
@@ -210,8 +219,10 @@ class FTTransformer(nn.Module):
         x = torch.cat((cls_tokens, x), dim = 1)
 
         # attend
-
-        x, attns = self.transformer(x, return_attn = True)
+        if return_attn:
+            x, attns = self.transformer(x, return_attn=True)
+        else:
+            x = self.transformer(x, return_attn=False)
 
         # get cls token
 
