@@ -40,7 +40,7 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, return_attn=False):
         h = self.heads
 
         x = self.norm(x)
@@ -58,7 +58,7 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)', h = h)
         out = self.to_out(out)
 
-        return out, attn
+        return out
 
 # transformer
 
@@ -85,24 +85,17 @@ class Transformer(nn.Module):
         self.checkpoint_grads = checkpoint_grads
 
     def forward(self, x, return_attn=False):
-        post_softmax_attns = []
-
         for attn, ff in self.layers:
             if self.checkpoint_grads:
-                attn_out, post_softmax_attn = torch.utils.checkpoint.checkpoint(attn, x)
-                post_softmax_attns.append(post_softmax_attn)
+                attn_out = torch.utils.checkpoint.checkpoint(attn, x, return_attn=False)
                 x = attn_out + x
                 x = torch.utils.checkpoint.checkpoint(ff, x) + x
             else:
-                attn_out, post_softmax_attn = attn(x)
-                post_softmax_attns.append(post_softmax_attn)
+                attn_out = attn(x, return_attn=False)
                 x = attn_out + x
                 x = ff(x) + x
 
-        if not return_attn:
-            return x
-
-        return x, torch.stack(post_softmax_attns)
+        return x
 
 # numerical embedder
 
@@ -233,19 +226,16 @@ class FTTransformer(nn.Module):
 
         return logits, attns
 
-    def get_embeddings(self, x_categ, x_numer):
-        assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
-
+    def get_embeddings(self, x_categ, x_cont):
         xs = []
         if self.num_unique_categories > 0:
             x_categ = x_categ + self.categories_offset
-            x_categ = x_categ.long()  # Convert x_categ to Long data type
             x_categ = self.categorical_embeds(x_categ)
             xs.append(x_categ)
 
         if self.num_continuous > 0:
-            x_numer = self.numerical_embedder(x_numer)
-            xs.append(x_numer)
+            x_cont = self.numerical_embedder(x_cont)
+            xs.append(x_cont)
 
         x = torch.cat(xs, dim=1)
 
@@ -253,5 +243,5 @@ class FTTransformer(nn.Module):
         cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
         x = torch.cat((cls_tokens, x), dim=1)
 
-        x = self.transformer(x, return_attn=False)  # Only return the output tensor
+        x = self.transformer(x, return_attn=False)
         return x[:, 1:]  # Exclude the CLS token from the embeddings

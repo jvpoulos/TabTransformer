@@ -69,7 +69,7 @@ class Attention(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, return_attn=False):
         h = self.heads
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
@@ -80,7 +80,7 @@ class Attention(nn.Module):
 
         out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)', h = h)
-        return self.to_out(out), attn
+        return self.to_out(out)
 
 # transformer
 
@@ -107,24 +107,17 @@ class Transformer(nn.Module):
         self.checkpoint_grads = checkpoint_grads  # Store the value of the argument
 
     def forward(self, x, return_attn=False):
-        post_softmax_attns = []
-
         for attn, ff in self.layers:
             if self.checkpoint_grads:
-                attn_out, post_softmax_attn = torch.utils.checkpoint.checkpoint(attn, x)
-                post_softmax_attns.append(post_softmax_attn)
-                x = x + attn_out
+                attn_out = torch.utils.checkpoint.checkpoint(attn, x, return_attn=False)
+                x = attn_out + x
                 x = torch.utils.checkpoint.checkpoint(ff, x) + x
             else:
-                attn_out, post_softmax_attn = attn(x)
-                post_softmax_attns.append(post_softmax_attn)
-                x = x + attn_out
+                attn_out = attn(x, return_attn=False)
+                x = attn_out + x
                 x = ff(x) + x
 
-        if not return_attn:
-            return x
-
-        return x, torch.stack(post_softmax_attns)
+        return x
 # mlp
 
 class MLP(nn.Module):
