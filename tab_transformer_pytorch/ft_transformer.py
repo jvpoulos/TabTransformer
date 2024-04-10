@@ -84,7 +84,7 @@ class Transformer(nn.Module):
 
         self.checkpoint_grads = checkpoint_grads
 
-   def forward(self, x, return_attn=False):
+    def forward(self, x, return_attn=False):
         post_softmax_attns = []
 
         for attn, ff in self.layers:
