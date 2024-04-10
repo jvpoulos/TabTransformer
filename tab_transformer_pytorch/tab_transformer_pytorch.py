@@ -57,7 +57,7 @@ class Attention(nn.Module):
         self,
         dim,
         heads = 8,
-        dim_head = 16,
+        dim_head = 64,
         dropout = 0.
     ):
         super().__init__()
@@ -65,23 +65,35 @@ class Attention(nn.Module):
         self.heads = heads
         self.scale = dim_head ** -0.5
 
+        self.norm = nn.LayerNorm(dim)
+
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
-        self.to_out = nn.Linear(inner_dim, dim)
+        self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, return_attn=False):
         h = self.heads
+
+        x = self.norm(x)
+
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
-        sim = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+        q = q * self.scale
+
+        sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
         attn = sim.softmax(dim = -1)
-        attn = self.dropout(attn)
+        dropped_attn = self.dropout(attn)
 
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)', h = h)
-        return self.to_out(out)
+        out = self.to_out(out)
+
+        if return_attn:
+            return out, attn
+        else:
+            return out
 
 class Transformer(nn.Module):
     def __init__(
@@ -284,7 +296,7 @@ class TabTransformer(nn.Module):
 
             xs = []
             if self.num_unique_categories > 0:
-                x_categ = x_categ + self.categories_offset
+                x_categ = x_categ.long() + self.categories_offset  # Cast x_categ to long tensor
                 x_categ = self.categorical_embeds(x_categ)
                 xs.append(x_categ)
 
@@ -311,10 +323,9 @@ class TabTransformer(nn.Module):
 
                 xs = []
                 if self.num_unique_categories > 0:
-                    x_categ_batch = x_categ_batch + self.categories_offset
+                    x_categ_batch = x_categ_batch.long() + self.categories_offset  # Cast x_categ_batch to long tensor
                     x_categ_batch = self.categorical_embeds(x_categ_batch)
                     xs.append(x_categ_batch)
-
                 if self.num_continuous > 0:
                     x_cont_batch = self.numerical_embedder(x_cont_batch)
                     xs.append(x_cont_batch)

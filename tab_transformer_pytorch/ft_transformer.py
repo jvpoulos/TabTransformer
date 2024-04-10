@@ -58,7 +58,10 @@ class Attention(nn.Module):
         out = rearrange(out, 'b h n d -> b n (h d)', h = h)
         out = self.to_out(out)
 
-        return out
+        if return_attn:
+            return out, attn
+        else:
+            return out
 
 # transformer
 
@@ -244,7 +247,7 @@ class FTTransformer(nn.Module):
 
             xs = []
             if self.num_unique_categories > 0:
-                x_categ = x_categ + self.categories_offset
+                x_categ = x_categ.long() + self.categories_offset  # Cast x_categ to long tensor
                 x_categ = self.categorical_embeds(x_categ)
                 xs.append(x_categ)
 
@@ -271,10 +274,9 @@ class FTTransformer(nn.Module):
 
                 xs = []
                 if self.num_unique_categories > 0:
-                    x_categ_batch = x_categ_batch + self.categories_offset
+                    x_categ_batch = x_categ_batch.long() + self.categories_offset  # Cast x_categ_batch to long tensor
                     x_categ_batch = self.categorical_embeds(x_categ_batch)
                     xs.append(x_categ_batch)
-
                 if self.num_continuous > 0:
                     x_cont_batch = self.numerical_embedder(x_cont_batch)
                     xs.append(x_cont_batch)
