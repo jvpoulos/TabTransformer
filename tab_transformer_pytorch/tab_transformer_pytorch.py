@@ -277,26 +277,20 @@ class TabTransformer(nn.Module):
         return logits, attns
 
 
-    def get_embeddings(self, x_categ, x_cont, batch_size=1):
-        num_samples = x_categ.size(0)
-        embeddings = []
-
-        for i in range(0, num_samples, batch_size):
-            start = i
-            end = min(start + batch_size, num_samples)
-
-            x_categ_batch = x_categ[start:end]
-            x_cont_batch = x_cont[start:end]
+    def get_embeddings(self, x_categ, x_cont, batch_size=None):
+        if batch_size is None:
+            num_samples = x_categ.size(0)
+            embeddings = []
 
             xs = []
             if self.num_unique_categories > 0:
-                x_categ_batch = x_categ_batch + self.categories_offset
-                x_categ_batch = self.categorical_embeds(x_categ_batch)
-                xs.append(x_categ_batch)
+                x_categ = x_categ + self.categories_offset
+                x_categ = self.categorical_embeds(x_categ)
+                xs.append(x_categ)
 
             if self.num_continuous > 0:
-                x_cont_batch = self.numerical_embedder(x_cont_batch)
-                xs.append(x_cont_batch)
+                x_cont = self.numerical_embedder(x_cont)
+                xs.append(x_cont)
 
             x = torch.cat(xs, dim=1)
 
@@ -305,9 +299,37 @@ class TabTransformer(nn.Module):
             x = torch.cat((cls_tokens, x), dim=1)
 
             x = self.transformer(x, return_attn=False)
-            batch_embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
+            embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
+        else:
+            embeddings = []
+            for i in range(0, x_categ.size(0), batch_size):
+                start = i
+                end = min(start + batch_size, x_categ.size(0))
 
-            embeddings.append(batch_embeddings)
+                x_categ_batch = x_categ[start:end]
+                x_cont_batch = x_cont[start:end]
 
-        embeddings = torch.cat(embeddings, dim=0)
+                xs = []
+                if self.num_unique_categories > 0:
+                    x_categ_batch = x_categ_batch + self.categories_offset
+                    x_categ_batch = self.categorical_embeds(x_categ_batch)
+                    xs.append(x_categ_batch)
+
+                if self.num_continuous > 0:
+                    x_cont_batch = self.numerical_embedder(x_cont_batch)
+                    xs.append(x_cont_batch)
+
+                x = torch.cat(xs, dim=1)
+
+                b = x.shape[0]
+                cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
+                x = torch.cat((cls_tokens, x), dim=1)
+
+                x = self.transformer(x, return_attn=False)
+                batch_embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
+
+                embeddings.append(batch_embeddings)
+
+            embeddings = torch.cat(embeddings, dim=0)
+
         return embeddings
