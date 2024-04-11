@@ -198,32 +198,28 @@ class FTTransformer(nn.Module):
     def forward(self, x_categ, x_numer, return_attn=False):
         device = next(self.parameters()).device
         x_categ = x_categ.to(device)
-        x_cont = x_cont.to(device)
+        x_numer = x_numer.to(device)
         
         assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
 
         xs = []
         if self.num_unique_categories > 0:
             x_categ = x_categ + self.categories_offset
-
             x_categ = self.categorical_embeds(x_categ)
-
             xs.append(x_categ)
 
         # add numerically embedded tokens
         if self.num_continuous > 0:
             x_numer = self.numerical_embedder(x_numer)
-
             xs.append(x_numer)
 
         # concat categorical and numerical
-
-        x = torch.cat(xs, dim = 1)
+        x = torch.cat(xs, dim=1)
 
         # append cls tokens
         b = x.shape[0]
-        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b = b)
-        x = torch.cat((cls_tokens, x), dim = 1)
+        cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=b)
+        x = torch.cat((cls_tokens, x), dim=1)
 
         # attend
         if return_attn:
@@ -232,11 +228,9 @@ class FTTransformer(nn.Module):
             x = self.transformer(x, return_attn=False)
 
         # get cls token
-
         x = x[:, 0]
 
         # out in the paper is linear(relu(ln(cls)))
-
         logits = self.to_logits(x)
 
         if not return_attn:
