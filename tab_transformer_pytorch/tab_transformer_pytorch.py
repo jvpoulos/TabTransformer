@@ -91,9 +91,9 @@ class Attention(nn.Module):
         out = self.to_out(out)
 
         if return_attn:
-            return out, attn
+            return out.cpu(), attn
         else:
-            return out
+            return out.cpu()
 
 class Transformer(nn.Module):
     def __init__(
@@ -290,6 +290,10 @@ class TabTransformer(nn.Module):
 
 
     def get_embeddings(self, x_categ, x_cont, batch_size=None):
+        device = next(self.parameters()).device
+        x_categ = x_categ.to(device)
+        x_cont = x_cont.to(device)
+
         if batch_size is None:
             num_samples = x_categ.size(0)
             embeddings = []
@@ -312,6 +316,7 @@ class TabTransformer(nn.Module):
 
             x = self.transformer(x, return_attn=False)
             embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
+            return embeddings.cpu()
         else:
             embeddings = []
             for i in range(0, x_categ.size(0), batch_size):
@@ -341,6 +346,5 @@ class TabTransformer(nn.Module):
 
                 embeddings.append(batch_embeddings)
 
-            embeddings = torch.cat(embeddings, dim=0)
-
-        return embeddings
+                embeddings = torch.cat(embeddings, dim=0)
+                return embeddings.cpu()

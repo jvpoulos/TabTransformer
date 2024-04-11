@@ -196,6 +196,10 @@ class FTTransformer(nn.Module):
         )
 
     def forward(self, x_categ, x_numer, return_attn=False):
+        device = next(self.parameters()).device
+        x_categ = x_categ.to(device)
+        x_cont = x_cont.to(device)
+        
         assert x_categ.shape[-1] == self.num_categories, f'you must pass in {self.num_categories} values for your categories input'
 
         xs = []
@@ -223,9 +227,9 @@ class FTTransformer(nn.Module):
 
         # attend
         if return_attn:
-            x, attns = self.transformer(x, return_attn=True)
+            x.cpu(), attns = self.transformer(x, return_attn=True)
         else:
-            x = self.transformer(x, return_attn=False)
+            x = self.transformer(x, return_attn=False).cpu()
 
         # get cls token
 
@@ -241,6 +245,10 @@ class FTTransformer(nn.Module):
         return logits, attns
 
     def get_embeddings(self, x_categ, x_cont, batch_size=None):
+        device = next(self.parameters()).device
+        x_categ = x_categ.to(device)
+        x_cont = x_cont.to(device)
+
         if batch_size is None:
             num_samples = x_categ.size(0)
             embeddings = []
@@ -263,6 +271,7 @@ class FTTransformer(nn.Module):
 
             x = self.transformer(x, return_attn=False)
             embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
+            return embeddings.cpu()
         else:
             embeddings = []
             for i in range(0, x_categ.size(0), batch_size):
@@ -292,6 +301,5 @@ class FTTransformer(nn.Module):
 
                 embeddings.append(batch_embeddings)
 
-            embeddings = torch.cat(embeddings, dim=0)
-
-        return embeddings
+                embeddings = torch.cat(embeddings, dim=0)
+                return embeddings.cpu()
