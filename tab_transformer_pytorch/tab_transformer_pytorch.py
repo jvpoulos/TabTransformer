@@ -316,7 +316,7 @@ class TabTransformer(nn.Module):
 
             x = self.transformer(x, return_attn=False)
             embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
-            return embeddings.cpu()
+            return embeddings
         else:
             embeddings = []
             for i in range(0, x_categ.size(0), batch_size):
@@ -347,4 +347,4 @@ class TabTransformer(nn.Module):
                 embeddings.append(batch_embeddings)
 
                 embeddings = torch.cat(embeddings, dim=0)
-                return embeddings.cpu()
+                return embeddings

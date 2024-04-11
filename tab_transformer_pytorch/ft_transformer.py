@@ -227,9 +227,9 @@ class FTTransformer(nn.Module):
 
         # attend
         if return_attn:
-            x.cpu(), attns = self.transformer(x, return_attn=True)
+            x, attns = self.transformer(x, return_attn=True)
         else:
-            x = self.transformer(x, return_attn=False).cpu()
+            x = self.transformer(x, return_attn=False)
 
         # get cls token
 
@@ -271,7 +271,7 @@ class FTTransformer(nn.Module):
 
             x = self.transformer(x, return_attn=False)
             embeddings = x[:, 1:]  # Exclude the CLS token from the embeddings
-            return embeddings.cpu()
+            return embeddings
         else:
             embeddings = []
             for i in range(0, x_categ.size(0), batch_size):
@@ -302,4 +302,4 @@ class FTTransformer(nn.Module):
                 embeddings.append(batch_embeddings)
 
                 embeddings = torch.cat(embeddings, dim=0)
-                return embeddings.cpu()
+                return embeddings
