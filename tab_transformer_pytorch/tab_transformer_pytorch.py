@@ -58,7 +58,8 @@ class Attention(nn.Module):
         dim,
         heads = 8,
         dim_head = 64,
-        dropout = 0.
+        dropout = 0.,
+        use_flash_attn = False
     ):
         super().__init__()
         inner_dim = dim_head * heads
@@ -71,6 +72,7 @@ class Attention(nn.Module):
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
         self.dropout = nn.Dropout(dropout)
+        self.use_flash_attn = use_flash_attn
 
     def forward(self, x, return_attn=False):
         h = self.heads
@@ -81,13 +83,21 @@ class Attention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         q = q * self.scale
 
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        if self.use_flash_attn:
+            with torch.backends.cuda.sdp_kernel(
+                enable_flash=True, enable_math=False, enable_mem_efficient=False
+            ):
+                out = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout.p)
+            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+        else:
+            sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
-        attn = sim.softmax(dim = -1)
-        dropped_attn = self.dropout(attn)
+            attn = sim.softmax(dim = -1)
+            dropped_attn = self.dropout(attn)
 
-        out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
-        out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+            out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
+            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+
         out = self.to_out(out)
 
         if return_attn:
@@ -105,14 +115,15 @@ class Transformer(nn.Module):
         attn_dropout,
         ff_dropout,
         ff_hidden_mult = 2,
-        checkpoint_grads = False
+        checkpoint_grads = False,
+        use_flash_attn = False
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = attn_dropout)),
+                PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = attn_dropout, use_flash_attn=use_flash_attn)),
                 PreNorm(dim, FeedForward(dim, dim * ff_hidden_mult, dropout = ff_dropout))
             ]))
 
@@ -181,7 +192,8 @@ class TabTransformer(nn.Module):
         ff_dropout = 0.,
         use_shared_categ_embed = True,
         shared_categ_dim_divisor = 8,   # in paper, they reserve dimension / 8 for category shared embedding
-        checkpoint_grads=False,  
+        checkpoint_grads=False,
+        use_flash_attn=False  
     ):
         super().__init__()
         assert all(map(lambda n: n > 0, categories)), 'number of each category must be positive'

@@ -26,7 +26,8 @@ class Attention(nn.Module):
         dim,
         heads = 8,
         dim_head = 64,
-        dropout = 0.
+        dropout = 0.,
+        use_flash_attn = False
     ):
         super().__init__()
         inner_dim = dim_head * heads
@@ -39,6 +40,7 @@ class Attention(nn.Module):
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
         self.dropout = nn.Dropout(dropout)
+        self.use_flash_attn = use_flash_attn
 
     def forward(self, x, return_attn=False):
         h = self.heads
@@ -49,13 +51,21 @@ class Attention(nn.Module):
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
         q = q * self.scale
 
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
+        if self.use_flash_attn:
+            with torch.backends.cuda.sdp_kernel(
+                enable_flash=True, enable_math=False, enable_mem_efficient=False
+            ):
+                out = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout.p)
+            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+        else:
+            sim = einsum('b h i d, b h j d -> b h i j', q, k)
 
-        attn = sim.softmax(dim = -1)
-        dropped_attn = self.dropout(attn)
+            attn = sim.softmax(dim = -1)
+            dropped_attn = self.dropout(attn)
 
-        out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
-        out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+            out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
+            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+
         out = self.to_out(out)
 
         if return_attn:
@@ -137,7 +147,8 @@ class FTTransformer(nn.Module):
         num_special_tokens = 2,
         attn_dropout = 0.,
         ff_dropout = 0.,
-        checkpoint_grads=False
+        checkpoint_grads=False,
+        use_flash_attn=False
     ):
         super().__init__()
         assert all(map(lambda n: n > 0, categories)), 'number of each category must be positive'
@@ -185,6 +196,7 @@ class FTTransformer(nn.Module):
             attn_dropout = attn_dropout,
             ff_dropout = ff_dropout,
             checkpoint_grads=checkpoint_grads,
+            use_flash_attn=use_flash_attn
         )
 
         # to logits
