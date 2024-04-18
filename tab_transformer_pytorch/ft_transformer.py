@@ -208,8 +208,7 @@ class FTTransformer(nn.Module):
             nn.Linear(dim, dim_out)
         )
 
-    def forward(self, x_categ, x_numer, return_attn=False):
-        device = next(self.parameters()).device
+    def forward(self, x_categ, x_numer, device, return_attn=False):
         x_categ = x_categ.to(device)
         x_numer = x_numer.to(device)
         
