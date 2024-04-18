@@ -249,6 +249,7 @@ class TabTransformer(nn.Module):
             attn_dropout=attn_dropout,
             ff_dropout=ff_dropout,
             checkpoint_grads=checkpoint_grads,
+            use_flash_attn=use_flash_attn
         )
 
         # mlp to logits
