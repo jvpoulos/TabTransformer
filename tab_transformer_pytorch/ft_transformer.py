@@ -85,13 +85,14 @@ class Transformer(nn.Module):
         attn_dropout,
         ff_dropout,
         checkpoint_grads=False,
+        use_flash_attn=False
     ):
         super().__init__()
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Attention(dim, heads=heads, dim_head=dim_head, dropout=attn_dropout),
+                Attention(dim, heads=heads, dim_head=dim_head, dropout=attn_dropout, use_flash_attn=use_flash_attn),
                 FeedForward(dim, dropout=ff_dropout),
             ]))
 
