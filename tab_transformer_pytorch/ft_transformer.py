@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn, einsum
+from flash_attn import flash_attn_qkvpacked_func
 
 from einops import rearrange, repeat
 
@@ -47,31 +48,28 @@ class Attention(nn.Module):
 
         x = self.norm(x)
 
-        q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = h), (q, k, v))
-        q = q * self.scale
+        qkv = self.to_qkv(x)
+        qkv = qkv.chunk(3, dim=-1)
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=h), qkv)
 
         if self.use_flash_attn:
-            with torch.backends.cuda.sdp_kernel(
-                enable_flash=True, enable_math=False, enable_mem_efficient=False
-            ):
-                out = F.scaled_dot_product_attention(q, k, v, dropout_p=self.dropout.p)
-            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+            out = flash_attn_qkvpacked_func(
+                torch.stack([q, k, v], dim=2),
+                dropout_p=self.dropout.p,
+                softmax_scale=self.scale,
+                causal=False,
+            )
+            out = rearrange(out, 'b h n d -> b n (h d)')
         else:
-            sim = einsum('b h i d, b h j d -> b h i j', q, k)
+            sim = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
 
-            attn = sim.softmax(dim = -1)
-            dropped_attn = self.dropout(attn)
+            attn = sim.softmax(dim=-1)
+            attn = self.dropout(attn)
 
-            out = einsum('b h i j, b h j d -> b h i d', dropped_attn, v)
-            out = rearrange(out, 'b h n d -> b n (h d)', h = h)
+            out = einsum('b h i j, b h j d -> b h i d', attn, v)
+            out = rearrange(out, 'b h n d -> b n (h d)')
 
-        out = self.to_out(out)
-
-        if return_attn:
-            return out, attn
-        else:
-            return out
+        return self.to_out(out)
 
 # transformer
 
